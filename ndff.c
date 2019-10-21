@@ -19,16 +19,8 @@
 #endif
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef WIN32
-#include <winsock2.h> /* winsock.h is included automatically */
-#include <process.h>
-#include <io.h>
-#include <getopt.h>
-#define getopt getopt____
-#else
 #include <unistd.h>
 #include <netinet/in.h>
-#endif
 #include <string.h>
 #include <stdarg.h>
 #include <iconv.h>
@@ -43,16 +35,9 @@
 #include <sys/types.h>
 #include <syslog.h>
 
-#include "config.h"
-#include <libndpi/ndpi_api.h>
-
-#ifdef HAVE_LIBMSGPACKC
+#include <ndpi_api.h>
 #include <msgpack.h>
-#endif
-
-#ifdef HAVE_LIBJSON_C
 #include <json.h>
-#endif
 
 
 /* Timeouts */
@@ -127,7 +112,6 @@ static u_int16_t decode_tunnels = 0;
 static u_int8_t shutdown_app = 0, quiet_mode = 0;
 static u_int8_t num_threads = 1;
 static u_int32_t current_ndpi_memory = 0, max_ndpi_memory = 0;
-static char* server;
 #ifdef linux
 static int core_affinity[MAX_NUM_READER_THREADS];
 #endif
@@ -318,7 +302,7 @@ static void parse_options(int argc, char **argv) {
                 break;
                 
             case 'r':
-                printf("%s\n- nDPI (%s)\n", PACKAGE_STRING, ndpi_revision());
+                printf("%s\n- nDPI (%s)\n", "ndff", ndpi_revision());
                 exit(0);
                 
             case 'v':
@@ -336,17 +320,11 @@ static void parse_options(int argc, char **argv) {
 
             case 'm':
                 if(strcmp(optarg, "json") == 0){
-#ifndef HAVE_LIBJSON_C
 	                output(LOG_WARNING, "%s\n", "[WARN] this copy of ndff has been compiled without JSON-C: json export disabled");
-#else
                         json_flag = 1;
-#endif
                 }else if(strcmp((char *)optarg, "msgpack") == 0){
-#ifndef HAVE_LIBMSGPACKC
 	                output(LOG_WARNING, "%s\n", "[WARN] this copy of ndff has been compiled without msgpack-c: msgpack export disabled");
-#else
                     msgpack_flag = 1;
-#endif
                 }else{
                     help(0);
                 }
@@ -411,43 +389,6 @@ static void parse_options(int argc, char **argv) {
 
 /* ***************************************************** */
 
-static void debug_printf(u_int32_t protocol, void *id_struct,
-                         ndpi_log_level_t log_level,
-                         const char *format, ...) {
-    va_list va_ap;
-#ifndef WIN32
-    struct tm result;
-#endif
-    
-    if(log_level <= nDPI_traceLevel) {
-        char buf[8192], out_buf[8192];
-        char theDate[32];
-        const char *extra_msg = "";
-        time_t theTime = time(NULL);
-        
-        va_start (va_ap, format);
-        
-        if(log_level == NDPI_LOG_ERROR)
-            extra_msg = "ERROR: ";
-        else if(log_level == NDPI_LOG_TRACE)
-            extra_msg = "TRACE: ";
-        else
-            extra_msg = "DEBUG: ";
-        
-        memset(buf, 0, sizeof(buf));
-        strftime(theDate, 32, "%d/%b/%Y %H:%M:%S", localtime_r(&theTime,&result) );
-        vsnprintf(buf, sizeof(buf)-1, format, va_ap);
-        
-        snprintf(out_buf, sizeof(out_buf), "%s %s%s", theDate, extra_msg, buf);
-        printf("%s", out_buf);
-        fflush(stdout);
-    }
-    
-    va_end(va_ap);
-}
-
-/* ***************************************************** */
-
 static void *malloc_wrapper(size_t size) {
     current_ndpi_memory += size;
     
@@ -455,12 +396,6 @@ static void *malloc_wrapper(size_t size) {
         max_ndpi_memory = current_ndpi_memory;
     
     return malloc(size);
-}
-
-/* ***************************************************** */
-
-static void free_wrapper(void *freeable) {
-    free(freeable);
 }
 
 /* ***************************************************** */
@@ -561,13 +496,14 @@ static void print_flow(u_int16_t thread_id, struct ndpi_flow *flow) {
 	    char buf[64];
 
 	    fprintf(out, "[proto: %u.%u/%s]",
-			    flow->detected_protocol.master_protocol, flow->detected_protocol.protocol,
+			    flow->detected_protocol.master_protocol,
+			    flow->detected_protocol.app_protocol,
 			    ndpi_protocol2name(ndpi_thread_info[thread_id].ndpi_struct,
 				    flow->detected_protocol, buf, sizeof(buf)));
     } else
 	    fprintf(out, "[proto: %u/%s]",
-			    flow->detected_protocol.protocol,
-			    ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct, flow->detected_protocol.protocol));
+			    flow->detected_protocol.app_protocol,
+			    ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct, flow->detected_protocol.app_protocol));
 
     fprintf(out, "[Up: %u pkts/%llu bytes, Down: %u pkts/%llu bytes]",
 		    flow->out_pkts, (long long unsigned int)flow->out_bytes,
@@ -614,7 +550,6 @@ static void write_socket(u_int16_t thread_id, char *buf, int length){
 
 /* ***************************************************** */
 
-#ifdef HAVE_LIBMSGPACKC
 static int get_map_size(struct ndpi_flow *flow) {
     int size = 13;
     if(flow->detected_protocol.master_protocol) size++;
@@ -681,19 +616,19 @@ static void send_msgpack(u_int16_t thread_id, struct ndpi_flow *flow) {
     }
 
     msgpack_pack_string(pk, "detected_protocol");
-    msgpack_pack_int(&pk, flow->detected_protocol.protocol);
+    msgpack_pack_int(&pk, flow->detected_protocol.app_protocol);
     
     if(flow->detected_protocol.master_protocol) {
         char tmp[256];
         
         snprintf(tmp, sizeof(tmp), "%s.%s",
                  ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct, flow->detected_protocol.master_protocol),
-                 ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct, flow->detected_protocol.protocol));
+                 ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct, flow->detected_protocol.app_protocol));
         
         msgpack_pack_kv(pk,"protocol_name", tmp);
     } else
 	msgpack_pack_kv(pk,"protocol_name", ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct,
-				    flow->detected_protocol.protocol));
+				    flow->detected_protocol.app_protocol));
     
     msgpack_pack_string(pk, "out_pkts");
     msgpack_pack_int(&pk, flow->out_pkts);
@@ -729,11 +664,9 @@ static void send_msgpack(u_int16_t thread_id, struct ndpi_flow *flow) {
     write_socket(thread_id, sbuf.data, sbuf.size);
     msgpack_sbuffer_destroy(&sbuf);
 }
-#endif
 
 /* ***************************************************** */
 
-#ifdef HAVE_LIBJSON_C
 static void send_json(u_int16_t thread_id, struct ndpi_flow *flow) {
     json_object *jObj;
     
@@ -760,21 +693,21 @@ static void send_json(u_int16_t thread_id, struct ndpi_flow *flow) {
     if(flow->detected_protocol.master_protocol)
         json_object_object_add(jObj,"master_protocol",json_object_new_int(flow->detected_protocol.master_protocol));
     
-    json_object_object_add(jObj,"detected_protocol",json_object_new_int(flow->detected_protocol.protocol));
+    json_object_object_add(jObj,"detected_protocol",json_object_new_int(flow->detected_protocol.app_protocol));
     
     if(flow->detected_protocol.master_protocol) {
         char tmp[256];
         
         snprintf(tmp, sizeof(tmp), "%s.%s",
                  ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct, flow->detected_protocol.master_protocol),
-                 ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct, flow->detected_protocol.protocol));
+                 ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct, flow->detected_protocol.app_protocol));
         
         json_object_object_add(jObj,"protocol_name",
                                json_object_new_string(tmp));
     } else
         json_object_object_add(jObj,"protocol_name",
                                json_object_new_string(ndpi_get_proto_name(ndpi_thread_info[thread_id].ndpi_struct,
-                                                                          flow->detected_protocol.protocol)));
+                                                                          flow->detected_protocol.app_protocol)));
     
     json_object_object_add(jObj,"out_pkts",json_object_new_int(flow->out_pkts));
     json_object_object_add(jObj,"out_bytes",json_object_new_int(flow->out_bytes));
@@ -808,19 +741,14 @@ static void send_json(u_int16_t thread_id, struct ndpi_flow *flow) {
 
     json_object_put(jarray);
 }
-#endif
 
 /* ***************************************************** */
 
 static void send_flow(u_int16_t thread_id, struct ndpi_flow *flow) {
     if(json_flag){
-#ifdef HAVE_LIBJSON_C
         send_json(thread_id, flow);
-#endif
     }else if(msgpack_flag){
-#ifdef HAVE_LIBMSGPACKC
         send_msgpack(thread_id, flow);
-#endif
     }
 }
 
@@ -845,39 +773,16 @@ static void ndpi_flow_freer(void *node) {
 
 /* ***************************************************** */
 
-static void node_print_unknown_proto_walker(const void *node, ndpi_VISIT which, int depth, void *user_data) {
-    struct ndpi_flow *flow = *(struct ndpi_flow**)node;
-    u_int16_t thread_id = *((u_int16_t*)user_data);
-    
-    if(flow->detected_protocol.protocol != NDPI_PROTOCOL_UNKNOWN) return;
-    
-    if((which == ndpi_preorder) || (which == ndpi_leaf)) /* Avoid walking the same node multiple times */
-        print_flow(thread_id, flow);
-}
-
-/* ***************************************************** */
-
-static void node_print_known_proto_walker(const void *node, ndpi_VISIT which, int depth, void *user_data) {
-    struct ndpi_flow *flow = *(struct ndpi_flow**)node;
-    u_int16_t thread_id = *((u_int16_t*)user_data);
-    
-    if(flow->detected_protocol.protocol == NDPI_PROTOCOL_UNKNOWN) return;
-    
-    if((which == ndpi_preorder) || (which == ndpi_leaf)) /* Avoid walking the same node multiple times */
-        print_flow(thread_id, flow);
-}
-
-/* ***************************************************** */
-
 static u_int16_t node_guess_undetected_protocol(u_int16_t thread_id, struct ndpi_flow *flow) {
     flow->detected_protocol = ndpi_guess_undetected_protocol(ndpi_thread_info[thread_id].ndpi_struct,
+                                                             flow->ndpi_flow,
                                                              flow->protocol,
                                                              ntohl(flow->lower_ip),
                                                              ntohs(flow->lower_port),
                                                              ntohl(flow->upper_ip),
                                                              ntohs(flow->upper_port));
     
-    return(flow->detected_protocol.protocol);
+    return(flow->detected_protocol.app_protocol);
 }
 
 /* ***************************************************** */
@@ -888,7 +793,7 @@ static void node_proto_guess_walker(const void *node, ndpi_VISIT which, int dept
     
     if((which == ndpi_preorder) || (which == ndpi_leaf)) { /* Avoid walking the same node multiple times */
         if(enable_protocol_guess) {
-            if(flow->detected_protocol.protocol == NDPI_PROTOCOL_UNKNOWN) {
+            if(flow->detected_protocol.app_protocol == NDPI_PROTOCOL_UNKNOWN) {
                 node_guess_undetected_protocol(thread_id, flow);
             }
         }
@@ -910,7 +815,7 @@ static void node_idle_scan_walker(const void *node, ndpi_VISIT which, int depth,
             /* update stats */
             node_proto_guess_walker(node, which, depth, user_data);
             
-            if((flow->detected_protocol.protocol == NDPI_PROTOCOL_UNKNOWN) && !undetected_flows_deleted)
+            if((flow->detected_protocol.app_protocol == NDPI_PROTOCOL_UNKNOWN) && !undetected_flows_deleted)
                 undetected_flows_deleted = 1;
 
             if(verbose > 1)  print_flow(thread_id, flow);
@@ -1178,7 +1083,7 @@ static struct ndpi_flow *get_ndpi_flow6(u_int16_t thread_id,
     iph.version = 4;
     iph.saddr = iph6->ip6_src.u6_addr.u6_addr32[2] + iph6->ip6_src.u6_addr.u6_addr32[3];
     iph.daddr = iph6->ip6_dst.u6_addr.u6_addr32[2] + iph6->ip6_dst.u6_addr.u6_addr32[3];
-    iph.protocol = iph6->ip6_ctlun.ip6_un1.ip6_un1_nxt;
+    iph.protocol = iph6->ip6_hdr.ip6_un1_nxt;
     
     if(iph.protocol == 0x3C /* IPv6 destination option */) {
         u_int8_t *options = (u_int8_t*)iph6 + sizeof(const struct ndpi_ipv6hdr);
@@ -1188,7 +1093,7 @@ static struct ndpi_flow *get_ndpi_flow6(u_int16_t thread_id,
     
     return(get_ndpi_flow(thread_id, 6, vlan_id, &iph, iph6, ip_offset,
                          sizeof(struct ndpi_ipv6hdr),
-                         ntohs(iph6->ip6_ctlun.ip6_un1.ip6_un1_plen),
+                         ntohs(iph6->ip6_hdr.ip6_un1_plen),
                          tcph, udph, sport, dport,
                          src, dst, proto, payload, payload_len, src_to_dst_direction));
 }
@@ -1196,7 +1101,7 @@ static struct ndpi_flow *get_ndpi_flow6(u_int16_t thread_id,
 /* ***************************************************** */
 
 static int setup_socket(u_int16_t thread_id) {
-    int len, ret, result, sockfd;
+    int len, ret, sockfd;
     struct sockaddr_in address;
     
     /*クライアント用ソケット作成*/
@@ -1243,8 +1148,7 @@ static void setup_detection(u_int16_t thread_id) {
     memset(&ndpi_thread_info[thread_id], 0, sizeof(ndpi_thread_info[thread_id]));
     
     // init global detection structure
-    ndpi_thread_info[thread_id].ndpi_struct = ndpi_init_detection_module(detection_tick_resolution,
-                                                                         malloc_wrapper, free_wrapper, NULL);
+    ndpi_thread_info[thread_id].ndpi_struct = ndpi_init_detection_module();
     if(ndpi_thread_info[thread_id].ndpi_struct == NULL) {
         output(LOG_ERR, "%s\n", "[ERROR] global structure initialization failed");
         exit(-1);
@@ -1277,7 +1181,7 @@ static void terminate_detection(u_int16_t thread_id) {
         ndpi_thread_info[thread_id].ndpi_flows_root[i] = NULL;
     }
     
-    ndpi_exit_detection_module(ndpi_thread_info[thread_id].ndpi_struct, free_wrapper);
+    ndpi_exit_detection_module(ndpi_thread_info[thread_id].ndpi_struct);
 }
 
 /* ***************************************************** */
@@ -1370,25 +1274,25 @@ static unsigned int packet_processing(u_int16_t thread_id,
                                                             iph ? (uint8_t *)iph : (uint8_t *)iph6,
                                                             ipsize, time, src, dst);
 
-    if(flow->detected_protocol.protocol != NDPI_PROTOCOL_UNKNOWN){
+    if(flow->detected_protocol.app_protocol != NDPI_PROTOCOL_UNKNOWN){
         flow->detection_completed = 1;
         
-        if((flow->detected_protocol.protocol == NDPI_PROTOCOL_UNKNOWN) && (ndpi_flow->num_stun_udp_pkts > 0))
+        if((flow->detected_protocol.app_protocol == NDPI_PROTOCOL_UNKNOWN) && (ndpi_flow->protos.stun_ssl.stun.num_udp_pkts > 0))
             ndpi_set_detected_protocol(ndpi_thread_info[thread_id].ndpi_struct, ndpi_flow, NDPI_PROTOCOL_STUN, NDPI_PROTOCOL_UNKNOWN);
         
         snprintf(flow->host_server_name, sizeof(flow->host_server_name), "%s", flow->ndpi_flow->host_server_name);
         
-        if((proto == IPPROTO_TCP) && (flow->detected_protocol.protocol != NDPI_PROTOCOL_DNS)) {
-            snprintf(flow->ssl.client_certificate, sizeof(flow->ssl.client_certificate), "%s", flow->ndpi_flow->protos.ssl.client_certificate);
-            snprintf(flow->ssl.server_certificate, sizeof(flow->ssl.server_certificate), "%s", flow->ndpi_flow->protos.ssl.server_certificate);
+        if((proto == IPPROTO_TCP) && (flow->detected_protocol.app_protocol != NDPI_PROTOCOL_DNS)) {
+            snprintf(flow->ssl.client_certificate, sizeof(flow->ssl.client_certificate), "%s", flow->ndpi_flow->protos.stun_ssl.ssl.client_certificate);
+            snprintf(flow->ssl.server_certificate, sizeof(flow->ssl.server_certificate), "%s", flow->ndpi_flow->protos.stun_ssl.ssl.server_certificate);
         }
         
         if(flow->ndpi_flow != NULL) free_ndpi_flow(flow);
         
         if(verbose > 1) {
             if(enable_protocol_guess) {
-                if(flow->detected_protocol.protocol == NDPI_PROTOCOL_UNKNOWN) {
-                    flow->detected_protocol.protocol = node_guess_undetected_protocol(thread_id, flow),
+                if(flow->detected_protocol.app_protocol == NDPI_PROTOCOL_UNKNOWN) {
+                    flow->detected_protocol.app_protocol = node_guess_undetected_protocol(thread_id, flow),
                     flow->detected_protocol.master_protocol = NDPI_PROTOCOL_UNKNOWN;
                 }
             }
@@ -1531,10 +1435,8 @@ static void pcap_packet_callback(u_char *args,
     
     /* --- Ethernet header --- */
     const struct ndpi_ethhdr *ethernet;
-    /* --- Ethernet II header --- */
-    const struct ndpi_ethhdr *ethernet_2;
     /* --- LLC header --- */
-    const struct ndpi_llc_header *llc;
+    const struct ndpi_llc_header_snap *llc;
     
     /* --- Cisco HDLC header --- */
     const struct ndpi_chdlc *chdlc;
@@ -1562,13 +1464,12 @@ static void pcap_packet_callback(u_char *args,
     u_int16_t fc;
     u_int16_t type;
     int wifi_len;
-    int llc_off;
     int pyld_eth_len = 0;
     int check;
     u_int32_t fcs;
     
     u_int64_t time;
-    u_int16_t ip_offset, ip_len, ip6_offset;
+    u_int16_t ip_offset, ip_len;
     u_int16_t frag_off = 0, vlan_id = 0;
     u_int8_t proto = 0;
     u_int32_t label;
@@ -1637,8 +1538,8 @@ datalink_check:
             
             if(pyld_eth_len != 0) {
                 /* check for LLC layer with SNAP extension */
-                if(packet[ip_offset] == SNAP) {
-                    llc = (struct ndpi_llc_header *)(&packet[ip_offset]);
+                llc = (struct ndpi_llc_header_snap *)(&packet[ip_offset]);
+                if(llc->dsap == SNAP || llc->ssap == SNAP) {
                     type = llc->snap.proto_ID;
                     ip_offset += + 8;
                 }
@@ -1677,12 +1578,12 @@ datalink_check:
                 break;
             
             /* Check ether_type from LLC */
-            llc = (struct ndpi_llc_header*)(packet + eth_offset + wifi_len + radio_len);
+            llc = (struct ndpi_llc_header_snap*)(packet + eth_offset + wifi_len + radio_len);
             if(llc->dsap == SNAP)
                 type = ntohs(llc->snap.proto_ID);
             
             /* Set IP header offset */
-            ip_offset = wifi_len + radio_len + sizeof(struct ndpi_llc_header) + eth_offset;
+            ip_offset = wifi_len + radio_len + sizeof(struct ndpi_llc_header_snap) + eth_offset;
             break;
             
         case DLT_RAW:
@@ -1766,7 +1667,7 @@ iph_check:
         }
     } else if(iph->version == 6) {
         iph6 = (struct ndpi_ipv6hdr *)&packet[ip_offset];
-        proto = iph6->ip6_ctlun.ip6_un1.ip6_un1_nxt;
+        proto = iph6->ip6_hdr.ip6_un1_nxt;
         ip_len = sizeof(struct ndpi_ipv6hdr);
         
         if(proto == 0x3C /* IPv6 destination option */) {
@@ -1871,7 +1772,7 @@ static void run_pcap_loop(u_int16_t thread_id) {
 void *processing_thread(void *_thread_id) {
     long thread_id = (long) _thread_id;
     
-#if defined(linux) && defined(HAVE_PTHREAD_SETAFFINITY_NP)
+#if defined(linux)
     if(core_affinity[thread_id] >= 0) {
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
@@ -1940,8 +1841,6 @@ void run() {
 /* ***************************************************** */
 
 int main(int argc, char **argv) {
-    int i;
-    
     memset(ndpi_thread_info, 0, sizeof(ndpi_thread_info));
     memset(&pcap_start, 0, sizeof(pcap_start));
     memset(&pcap_end, 0, sizeof(pcap_end));
