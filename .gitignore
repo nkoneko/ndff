@@ -1,5 +1,6 @@
 build/
 subprojects/
+.vscode/
 
 # Object files
 *.o

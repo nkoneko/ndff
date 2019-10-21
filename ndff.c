@@ -595,7 +595,7 @@ static void send_msgpack(u_int16_t thread_id, struct ndpi_flow *flow) {
     msgpack_pack_array(&pk, 3);
     
     msgpack_pack_string(pk, _tag);
-    msgpack_pack_uint64(&pk, flow->first_seen / detection_tick_resolution);
+    msgpack_pack_uint64(&pk, flow->first_seen);
     msgpack_pack_map(&pk, get_map_size(flow));
 
     msgpack_pack_kv(pk, "protocol", ipProto2Name(flow->protocol));
@@ -639,9 +639,9 @@ static void send_msgpack(u_int16_t thread_id, struct ndpi_flow *flow) {
     msgpack_pack_string(pk, "in_bytes");
     msgpack_pack_int(&pk, flow->in_bytes);
     msgpack_pack_string(pk, "first_switched");
-    msgpack_pack_int64(&pk, flow->first_seen / detection_tick_resolution);
+    msgpack_pack_int64(&pk, flow->first_seen);
     msgpack_pack_string(pk, "last_switched");
-    msgpack_pack_int64(&pk, flow->last_seen / detection_tick_resolution);
+    msgpack_pack_int64(&pk, flow->last_seen);
     
     if(isgraph_string(flow->host_server_name)){
         msgpack_pack_kv(pk, "server_name", flow->host_server_name);
@@ -713,8 +713,8 @@ static void send_json(u_int16_t thread_id, struct ndpi_flow *flow) {
     json_object_object_add(jObj,"out_bytes",json_object_new_int(flow->out_bytes));
     json_object_object_add(jObj,"in_pkts",json_object_new_int(flow->in_pkts));
     json_object_object_add(jObj,"in_bytes",json_object_new_int(flow->in_bytes));
-    json_object_object_add(jObj,"first_switched",  json_object_new_int64((signed)(flow->first_seen / detection_tick_resolution)));
-    json_object_object_add(jObj,"last_switched",  json_object_new_int64((signed)(flow->first_seen / detection_tick_resolution)));
+    json_object_object_add(jObj,"first_switched",  json_object_new_int64((signed)(flow->first_seen)));
+    json_object_object_add(jObj,"last_switched",  json_object_new_int64((signed)(flow->first_seen)));
     
     if(isgraph_string(flow->host_server_name)){
         json_object_object_add(jObj,"server_name",json_object_new_string(flow->host_server_name));
@@ -733,7 +733,7 @@ static void send_json(u_int16_t thread_id, struct ndpi_flow *flow) {
     }
     
     json_object_array_add(jarray, json_object_new_string(_tag));
-    json_object_array_add(jarray, json_object_new_int64((signed)(flow->first_seen / detection_tick_resolution)));
+    json_object_array_add(jarray, json_object_new_int64((signed)(flow->first_seen)));
     json_object_array_add(jarray, jObj);
     
     char* body = (char *)json_object_to_json_string(jarray);

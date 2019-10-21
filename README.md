@@ -1,70 +1,41 @@
 ndff (nDPI for fluentd)
 ===================
-ndff is a flow collector with nDPI library for fluentd.  
-ndff has been implemented on the basis of ndpiReader which is an example in nDPI.
-
+ndff is an open source flow collector shipping the data to fluentd.
+ndff is a blazingly fast analyzer with low memory consumption, compared with Packetbeat
 
 Overview
 --------
 
-![b44f24cc-f5b5-11e5-8e98-b641ec22cce4](https://cloud.githubusercontent.com/assets/2253692/14105522/0d5b111c-f5e7-11e5-88dd-cef1cf914614.png)
+ndff was originally developed by [Teppei Fukuda](https://github.com/knqyf263), as mentioned in [this blog post](https://engineer.dena.jp/2016/04/security-dpi.html). A large part of source code is borrowed from ndpiReader.c, which can read pcap file (or live-capture an interface) and analyze protocols. This flow collector analyzes captured packets and serializes them as json or msgpack to send to fluentd.
 
-
-[nDPI](http://www.ntop.org/products/deep-packet-inspection/ndpi/) is an open source LGPLv3 library for deep-packet inspection.
-ndpiReader is an example in nDPI which has the following features.
-- Detect the protocol from packets (pcap files or devices)
-- Apply a BPF filter for filtering selected traffic
-- Export the content of packets to a file in JSON format
-- etc... 
-
-It's very userful if the results of nDPI can be analyzed in fluentd.  
-So, ndff aggregates packets as a flow like NetFlow and forwards the results to the fluentd server in the form of JSON or MessagePack.
-
-Configuration
+Dependencies
 --------
-### Requirements
-- Common
-  - nDPI
-- From source
-  - GNU tools (autogen, automake, autoconf, libtool, pkg-config)
-  - GNU C compiler (gcc) 
 
-### Building and Installing
-#### Quick Start
-Install ndff from binary (CentOS 6).
-```
-$ sudo yum -y install libpcap msgpack json-c
-$ sudo rpm -ivh https://forensics.cert.org/centos/cert/6.5/x86_64/nDPI-1.7.1-1.el6.x86_64.rpm
-$ sudo rpm -ivh https://github.com/knqyf263/ndff/releases/download/0.0.2/ndff-0.0.2-1.x86_64.rpm
-```
-And run
-```
-$ sudo ndff -i eth0 -s 127.0.0.1 -p 24224 -m msgpack
-```
+### Libraries
 
-#### From source
-Refer to [INSTALL.md](https://github.com/knqyf263/ndff/blob/master/INSTALL.md)  
+- libndpi (nDPI) >= 2.8
+- libpcap >= 1.9
+- msgpack-c
+- json-c
 
-Then, install [json-c](https://github.com/json-c/json-c) or [msgpack-c](https://github.com/msgpack/msgpack-c).  
-In the case of json-c:
-```
-$ git clone https://github.com/json-c/json-c.git
-$ cd json-c
-$ sh autogen.sh
-$ ./configure
-$ make
-$ make install
-```
+### Build tools
 
-Finally, install ndff from git repository.
+- ninja
+- meson
+- C compilers
+
+### Build from source
+
+Install libndpi, libpcap, msgpack-c, json-c and add their pkgconfigs to $PKG_CONFIG_PATH.
+
+Then, hit the following commands to build ndff.
 ```
-$ git clone https://github.com/knqyf263/ndff.git
+$ git clone https://github.com/nkoneko/ndff.git
 $ cd ndff
-$ ./autogen.sh
-$ make
-$ sudo make install
+$ meson build
+$ cd build
+$ ninja
 ```
-
 
 ### Options
 

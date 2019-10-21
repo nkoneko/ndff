@@ -1,4 +1,7 @@
-project('ndff', 'c')
+project('ndff', 'c',
+    version: '0.1.0',
+    license: 'GPL'
+)
 
 deps = [
     dependency('libndpi', versions: '>=2.8'),
