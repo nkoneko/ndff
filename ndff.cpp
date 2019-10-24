@@ -39,7 +39,10 @@
 #include <msgpack.h>
 #include <json.h>
 
-
+#ifdef __cplusplus
+namespace dena::security {
+extern "C" {
+#endif
 /* Timeouts */
 #define TCP_TIMEOUT     3600 
 #define TCP_RST_TIMEOUT     120
@@ -821,6 +824,7 @@ static void node_idle_scan_walker(const void *node, ndpi_VISIT which, int depth,
             if(verbose > 1)  print_flow(thread_id, flow);
             if(!dryrun_flag) send_flow(thread_id, flow);
             
+            // TODO: SYN-ACKの時点で一度送信する実装を入れる場合は、ここでTCPパケットのSYN-ACKが立っている場合にはfreeしないという条件分岐を入れる
             free_ndpi_flow(flow);
             
             /* adding to a queue (we can't delete it from the tree inline ) */
@@ -998,6 +1002,15 @@ static struct ndpi_flow *get_ndpi_flow(u_int16_t thread_id,
     flow.lower_port = lower_port, flow.upper_port = upper_port;
     
     idx = (vlan_id + lower_ip + upper_ip + iph->protocol + lower_port + upper_port) % NUM_ROOTS;
+    // 下の方にも書いたが、スレッドごとにフローをノードとする二分探索木を持っている。これをnode_cmp関数（ip, portなどを比較）を使って探索することによって、
+    // ここでは過去に見つけているフローと同一のフローを探す。フローをまとめるためにこのような処理を入れている。
+    // 大雑把に、書いてしまうなら、以降の処理は以下の擬似コードのようなことをしている。
+    // found = find(tree, flow)
+    // if not found:
+    //   flow = build_from_headers(ip_header, ...)
+    //   insert(tree, flow)
+    //   found = flow
+    // return found
     ret = ndpi_tfind(&flow, &ndpi_thread_info[thread_id].ndpi_flows_root[idx], node_cmp);
     
     if(ret == NULL) {
@@ -1040,15 +1053,16 @@ static struct ndpi_flow *get_ndpi_flow(u_int16_t thread_id,
         if((newflow->dst_id = malloc_wrapper(size_id_struct)) == NULL) {
             output(LOG_ERR, "[ERROR] %s(4): not enough memory\n", __FUNCTION__);
             free(newflow);
-                return(NULL);
-            } else
-                memset(newflow->dst_id, 0, size_id_struct);
-            
-            ndpi_tsearch(newflow, &ndpi_thread_info[thread_id].ndpi_flows_root[idx], node_cmp); /* Add */
-            
-            *src = newflow->src_id, *dst = newflow->dst_id;
-            
-            return newflow;
+            return(NULL);
+        } else
+            memset(newflow->dst_id, 0, size_id_struct);
+
+        // スレッドごとに (ndpi_thread_info[thread_id]ごとに) 二分探索木をもっていて、木のそれぞれのノードにflowをもっている
+        // node_cmp関数はflowのsrc_ipやdest_ip, portなどを比較して、同一フローか否かを判定する。異なる場合は、ipの値が小さい方がフローとして小さいなど順序を決めて-1, 1を出力している
+        // この順序を使って、二分探索木にノードを挿入していく。ちょっと木になるのは、nDPIの実装がかなり素朴な実装で平衡性がないので、最悪計算量がやや悪い（と思われる）
+        ndpi_tsearch(newflow, &ndpi_thread_info[thread_id].ndpi_flows_root[idx], node_cmp); /* Add */
+        *src = newflow->src_id, *dst = newflow->dst_id;
+        return newflow;
     } else {
         struct ndpi_flow *flow = *(struct ndpi_flow**)ret;
         
@@ -1267,6 +1281,7 @@ static unsigned int packet_processing(u_int16_t thread_id,
         return(0);
     }
     
+    // TODO: SYN-ACKで一旦送る実装を入れる。
     flow_update_expiry(flow, tcph, udph, proto);
     if(flow->detection_completed) return(0);
     
@@ -1274,6 +1289,7 @@ static unsigned int packet_processing(u_int16_t thread_id,
                                                             iph ? (uint8_t *)iph : (uint8_t *)iph6,
                                                             ipsize, time, src, dst);
 
+    // TODO: ここ、STUNをセットするところも、TLSの証明書をセットするところも条件がバグってるので直しましょう。
     if(flow->detected_protocol.app_protocol != NDPI_PROTOCOL_UNKNOWN){
         flow->detection_completed = 1;
         
@@ -1839,8 +1855,15 @@ void run() {
 }
 
 /* ***************************************************** */
+#ifdef __cplusplus
+}
+}
+#endif
 
 int main(int argc, char **argv) {
+#ifdef __cplusplus
+    using namespace dena::security;
+#endif
     memset(ndpi_thread_info, 0, sizeof(ndpi_thread_info));
     memset(&pcap_start, 0, sizeof(pcap_start));
     memset(&pcap_end, 0, sizeof(pcap_end));

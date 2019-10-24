@@ -1,4 +1,4 @@
-project('ndff', 'c',
+project('ndff', 'cpp',
     version: '0.1.0',
     license: 'GPL'
 )
@@ -6,7 +6,7 @@ project('ndff', 'c',
 deps = [
     dependency('libndpi', versions: '>=2.8'),
     dependency('msgpack', versions: '>=3.2'),
-    dependency('json-c', fallback: ['json-c', 'json-c_dep']),
+    dependency('json-c', fallback: ['json-c', 'json_c']),
     dependency('libpcap', versions: '>=1.9')
 ]
 executable('ndff', 'ndff.c', dependencies: deps)
